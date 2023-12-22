@@ -1,0 +1,13 @@
+<resources>
+    <string name="app_name">Recipes</string>
+    <array name="measurement_units">
+        <item>g</item>
+        <item>ml</item>
+        <item>liters</item>
+        <item>oz</item>
+        <item>fl oz</item>
+        <item>tsp</item>
+        <item>tbsp</item>
+        <item>cup</item>
+    </array>
+</resources>

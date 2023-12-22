@@ -1,0 +1,35 @@
+ syntax = "proto3";
+
+ option java_package = "com.rodrigossantos.recipe";
+ option java_multiple_files = true;
+
+ enum MeasurementUnit {
+   GRAMS = 0;
+   ML = 1;
+   LITERS = 2;
+   OZ = 3;
+   FL_OZ = 4;
+   TSP = 5;
+   TBSP = 6;
+   CUP = 7;
+ }
+
+ message Ingredient {
+   string name = 1;
+   float quantity = 2;
+   MeasurementUnit unit = 3;
+ }
+
+ message Step {
+   string text = 1;
+ }
+
+ message Recipe {
+   string name = 1;
+   repeated Ingredient ingredients = 2;
+   repeated Step steps = 3;
+ }
+
+ message RecipeList {
+   repeated Recipe recipes = 1;
+ }
