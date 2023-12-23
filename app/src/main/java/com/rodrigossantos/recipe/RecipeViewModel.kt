@@ -84,7 +84,7 @@ class RecipeViewModel(private val repository: RecipesRepository, private val rec
     val uiState: StateFlow<UiState> = combine(_uiState, recipeFlow) { state, recipe ->
         val multiplier = Multiplier.entries[state.currentMultiplierIndex].value
         val updatedItems = state.items.map {
-            if (it is RecipeItem.Ingredient) {
+            if (it is RecipeItem.Ingredient && it.dataIndex != -1) {
                 val quantity = recipe.ingredientsList[it.dataIndex].quantity * multiplier
                 it.copy(quantity = DecimalFormat("#.##").format(quantity))
             } else {
@@ -220,13 +220,21 @@ class RecipeViewModel(private val repository: RecipesRepository, private val rec
         val item = uiState.value.items[index] as? RecipeItem.Modifiable ?: return
         _uiState.value = uiState.value.copy(
             items = uiState.value.items.toMutableList().also {
-                it[index] = item.duplicate(editing = false)
+                if (item.dataIndex != -1) {
+                    it[index] = item.duplicate(editing = false)
+                } else {
+                    it.removeAt(index)
+                }
             }.toList()
         )
     }
 
     fun deleteItem(index: Int) {
         val item = uiState.value.items[index] as? RecipeItem.Modifiable ?: return
+        if (item.dataIndex == -1) {
+            cancelEdit(index)
+            return
+        }
         viewModelScope.launch {
             when (item) {
                 is RecipeItem.Ingredient -> repository.removeIngredient(recipeIndex, item.dataIndex)
