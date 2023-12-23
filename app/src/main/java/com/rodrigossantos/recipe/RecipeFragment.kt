@@ -20,8 +20,6 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.navigation.fragment.findNavController
 import androidx.navigation.fragment.navArgs
-import androidx.recyclerview.widget.LinearLayoutManager
-import androidx.recyclerview.widget.RecyclerView
 import com.rodrigossantos.recipe.databinding.AddButtonRecipeItemBinding
 import com.rodrigossantos.recipe.databinding.FragmentRecipeBinding
 import com.rodrigossantos.recipe.databinding.RecipeHeaderItemBinding
@@ -53,6 +51,8 @@ class RecipeFragment : Fragment() {
     private val viewModel: RecipeViewModel by viewModels(
         factoryProducer = { RecipeViewModel.Factory(binding.root.context, args.recipeIndex) }
     )
+
+    private val adapter by lazy { buildAdapter() }
 
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?,
@@ -94,19 +94,7 @@ class RecipeFragment : Fragment() {
             }
             true
         }
-        val adapter = RecipeItemsAdapter(
-            itemClick = viewModel::itemClicked,
-            addIngredient = viewModel::addIngredientClicked,
-            saveIngredient = viewModel::saveIngredient,
-            addStep = viewModel::addStepClicked,
-            saveStep = viewModel::saveStep,
-            cancelEdit = viewModel::cancelEdit,
-            deleteItem = viewModel::deleteItem
-        )
-        binding.list.apply {
-            layoutManager = LinearLayoutManager(context)
-            this.adapter = adapter
-        }
+        binding.list.adapter = adapter
         lifecycleScope.launch {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.RESUMED) {
                 viewModel.uiState.collect {
@@ -131,114 +119,93 @@ class RecipeFragment : Fragment() {
                     multiplierButton.title =
                         it.availableMultipliers[it.currentMultiplierIndex].stringValue
                     saveRecipeButton.isVisible = it.editing
-                    adapter.items = it.items
                 }
             }
         }
     }
-}
 
-class RecipeItemsAdapter(
-    private val itemClick: (index: Int) -> Unit,
-    private val addIngredient: () -> Unit,
-    private val saveIngredient: (index: Int, quantity: String, unitIndex: Int, name: String) -> Unit,
-    private val addStep: () -> Unit,
-    private val saveStep: (index: Int, content: String) -> Unit,
-    private val cancelEdit: (index: Int) -> Unit,
-    private val deleteItem: (index: Int) -> Unit,
-) :
-    RecyclerView.Adapter<RecipeItemsAdapter.ViewHolder>() {
-
-    enum class ViewType(val value: Int) {
-        HEADER(1),
-        INGREDIENT(2),
-        ADD_INGREDIENT(3),
-        STEP(4),
-        ADD_STEP(5),
+    private enum class ViewType {
+        HEADER,
+        INGREDIENT,
+        ADD_INGREDIENT,
+        STEP,
+        ADD_STEP,
     }
 
-    var items: List<RecipeViewModel.RecipeItem> = emptyList()
-        get() = field
-        set(value) {
-            field = value
-            notifyDataSetChanged()
+    private fun buildAdapter() = createAdapter(
+        itemsProducer = viewLifecycleOwner.produceOnLifecycle {
+            viewModel.uiState.collect { items = it.items }
+        },
+        getViewType = { item: RecipeViewModel.RecipeItem ->
+            when (item) {
+                is RecipeViewModel.RecipeItem.Header -> ViewType.HEADER
+                is RecipeViewModel.RecipeItem.Ingredient -> ViewType.INGREDIENT
+                is RecipeViewModel.RecipeItem.AddIngredient -> ViewType.ADD_INGREDIENT
+                is RecipeViewModel.RecipeItem.Step -> ViewType.STEP
+                is RecipeViewModel.RecipeItem.AddStep -> ViewType.ADD_STEP
+            }
+        },
+        create = { parent, type ->
+            when (type) {
+                ViewType.HEADER -> RecipeHeaderItemBinding.inflate(
+                    LayoutInflater.from(parent.context),
+                    parent,
+                    false,
+                )
+
+                ViewType.INGREDIENT -> RecipeIngredientItemBinding.inflate(
+                    LayoutInflater.from(
+                        parent.context
+                    ),
+                    parent, false,
+                )
+
+                ViewType.STEP -> RecipeStepItemBinding.inflate(
+                    LayoutInflater.from(parent.context),
+                    parent,
+                    false
+                )
+
+                ViewType.ADD_STEP,
+                ViewType.ADD_INGREDIENT -> AddButtonRecipeItemBinding.inflate(
+                    LayoutInflater.from(
+                        parent.context
+                    ), parent, false
+                )
+            }
         }
-
-    override fun onCreateViewHolder(parent: ViewGroup, viewTypeValue: Int): ViewHolder {
-        val viewType =
-            ViewType.entries.find { it.value == viewTypeValue } ?: error("invalid view type")
-        return when (viewType) {
-            ViewType.HEADER -> ViewHolder.HeaderViewHolder(
-                RecipeHeaderItemBinding.inflate(
-                    LayoutInflater.from(parent.context),
-                    parent,
-                    false,
-                )
-            )
-
-            ViewType.INGREDIENT -> ViewHolder.IngredientViewHolder(
-                RecipeIngredientItemBinding.inflate(
-                    LayoutInflater.from(parent.context),
-                    parent,
-                    false,
-                )
-            )
-
-            ViewType.STEP -> ViewHolder.StepViewHolder(
-                RecipeStepItemBinding.inflate(
-                    LayoutInflater.from(parent.context),
-                    parent,
-                    false,
-                )
-            )
-
-            ViewType.ADD_STEP, ViewType.ADD_INGREDIENT -> ViewHolder.AddButtonViewHolder(
-                AddButtonRecipeItemBinding.inflate(
-                    LayoutInflater.from(parent.context),
-                    parent,
-                    false,
-                )
-            )
-        }
-    }
-
-    override fun onBindViewHolder(holder: ViewHolder, position: Int) {
-        val item = items.getOrNull(position) ?: return
+    ) { binding, item, position ->
         when (item) {
             is RecipeViewModel.RecipeItem.Header -> {
-                if (holder !is ViewHolder.HeaderViewHolder) return
-                holder.binding.titleText.text = item.title
+                (binding as RecipeHeaderItemBinding).titleText.text = item.title
             }
 
             is RecipeViewModel.RecipeItem.Modifiable -> {
-                (holder as ViewHolder.ModifiableViewHolder).run {
-                    clickableView.setOnClickListener {
-                        itemClick(position)
-                    }
-                    cancelButton.setOnClickListener {
-                        cancelEdit(position)
-                        clickableView.requestFocus()
-                    }
-                    deleteButton.setOnClickListener {
-                        deleteClicked(it.context, position)
-                        clickableView.requestFocus()
-                    }
-                    if (item.editing) {
-                        viewGroup.visibility = View.GONE
-                        editGroup.visibility = View.VISIBLE
-                        firstField.requestFocus()
-                        firstField.showKeyboard()
-                    } else {
-                        viewGroup.visibility = View.VISIBLE
-                        editGroup.visibility = View.GONE
-                    }
-                }
                 when (item) {
                     is RecipeViewModel.RecipeItem.Ingredient -> {
-                        (holder as ViewHolder.IngredientViewHolder).binding.run {
+                        (binding as RecipeIngredientItemBinding).run {
+                            var selectedUnitIndex: Int = item.measurementUnitIndex
+                            bindModifiableItem(
+                                binding.root,
+                                binding.quantityEdittext,
+                                binding.saveButton,
+                                saveButtonClicked = {
+                                    viewModel.saveIngredient(
+                                        position,
+                                        quantityEdittext.text.toString(),
+                                        selectedUnitIndex,
+                                        nameEdittext.text.toString(),
+                                    )
+                                },
+                                binding.cancelButton,
+                                binding.deleteButton,
+                                binding.viewGroup,
+                                binding.editGroup,
+                                item,
+                                position,
+                            )
                             quantityText.text = item.quantity
                             quantityEdittext.setText(item.quantity)
-                            var selectedUnitIndex: Int = item.measurementUnitIndex
                             val units =
                                 quantityText.resources.getStringArray(R.array.measurement_units)
                             unitText.text = units[selectedUnitIndex]
@@ -254,128 +221,88 @@ class RecipeItemsAdapter(
                             unitSelector.setOnClickListener { popupMenu.show() }
                             nameText.text = item.name
                             nameEdittext.setText(item.name)
-                            saveButton.setOnClickListener {
-                                saveIngredient(
-                                    position,
-                                    quantityEdittext.text.toString(),
-                                    selectedUnitIndex,
-                                    nameEdittext.text.toString(),
-                                )
-                                quantityText.requestFocus()
-                            }
                         }
                     }
 
                     is RecipeViewModel.RecipeItem.Step -> {
-                        (holder as ViewHolder.StepViewHolder).binding.run {
+                        (binding as RecipeStepItemBinding).run {
+                            bindModifiableItem(
+                                binding.root,
+                                binding.contentEdittext,
+                                binding.saveButton,
+                                saveButtonClicked = {
+                                    viewModel.saveStep(
+                                        position,
+                                        contentEdittext.text.toString()
+                                    )
+                                },
+                                binding.cancelButton,
+                                binding.deleteButton,
+                                binding.viewGroup,
+                                binding.editGroup,
+                                item,
+                                position,
+                            )
                             indexText.text = item.index
                             contentText.text = item.text
                             contentEdittext.setText(item.text)
-                            saveButton.setOnClickListener {
-                                saveStep(
-                                    position,
-                                    contentEdittext.text.toString()
-                                )
-                                root.requestFocus()
-                            }
                         }
                     }
                 }
             }
 
             is RecipeViewModel.RecipeItem.AddIngredient -> {
-                (holder as ViewHolder.AddButtonViewHolder).binding.run {
+                (binding as AddButtonRecipeItemBinding).run {
                     addButtonText.text = "Add Ingredient"
-                    addButtonText.setOnClickListener { addIngredient() }
+                    addButtonText.setOnClickListener { viewModel.addIngredientClicked() }
                 }
             }
 
             is RecipeViewModel.RecipeItem.AddStep -> {
-                (holder as ViewHolder.AddButtonViewHolder).binding.run {
+                (binding as AddButtonRecipeItemBinding).run {
                     addButtonText.text = "Add Step"
-                    addButtonText.setOnClickListener { addStep() }
+                    addButtonText.setOnClickListener { viewModel.addStepClicked() }
                 }
             }
         }
     }
 
-    override fun getItemViewType(position: Int): Int {
-        return getItemViewType(items[position]).value
-    }
-
-    private fun getItemViewType(item: RecipeViewModel.RecipeItem): ViewType {
-        return when (item) {
-            is RecipeViewModel.RecipeItem.Header -> ViewType.HEADER
-            is RecipeViewModel.RecipeItem.Ingredient -> ViewType.INGREDIENT
-            is RecipeViewModel.RecipeItem.AddIngredient -> ViewType.ADD_INGREDIENT
-            is RecipeViewModel.RecipeItem.Step -> ViewType.STEP
-            is RecipeViewModel.RecipeItem.AddStep -> ViewType.ADD_STEP
+    private fun bindModifiableItem(
+        clickableView: View,
+        firstField: EditText,
+        saveButton: Button,
+        saveButtonClicked: () -> Unit,
+        cancelButton: Button,
+        deleteButton: Button,
+        viewGroup: Group,
+        editGroup: Group,
+        item: RecipeViewModel.RecipeItem.Modifiable,
+        position: Int,
+    ) {
+        clickableView.setOnClickListener {
+            viewModel.itemClicked(position)
         }
-    }
-
-    override fun getItemCount(): Int = items.count()
-
-    private fun deleteClicked(context: Context, position: Int) {
-        AlertDialog.Builder(context)
-            .setTitle("Are you sure")
-            .setPositiveButton("Delete") { dialog, _ ->
-                deleteItem(position)
-                dialog.dismiss()
-            }
-            .setNegativeButton("Cancel") { dialog, _ -> dialog.dismiss() }
-            .show()
-    }
-
-    sealed class ViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
-        class HeaderViewHolder(val binding: RecipeHeaderItemBinding) : ViewHolder(binding.root)
-        sealed interface ModifiableViewHolder {
-            val clickableView: View
-            val firstField: EditText
-            val saveButton: Button
-            val cancelButton: Button
-            val deleteButton: Button
-            val viewGroup: Group
-            val editGroup: Group
+        cancelButton.setOnClickListener {
+            viewModel.cancelEdit(position)
+            clickableView.requestFocus()
         }
-
-        class IngredientViewHolder(val binding: RecipeIngredientItemBinding) :
-            ViewHolder(binding.root), ModifiableViewHolder {
-            override val clickableView: View
-                get() = binding.root
-            override val firstField: EditText
-                get() = binding.quantityEdittext
-            override val saveButton: Button
-                get() = binding.saveButton
-            override val cancelButton: Button
-                get() = binding.cancelButton
-            override val deleteButton: Button
-                get() = binding.deleteButton
-            override val viewGroup: Group
-                get() = binding.viewGroup
-            override val editGroup: Group
-                get() = binding.editGroup
+        deleteButton.setOnClickListener {
+            viewModel.deleteItem(position)
+            clickableView.requestFocus()
         }
-
-        class StepViewHolder(val binding: RecipeStepItemBinding) : ViewHolder(binding.root),
-            ModifiableViewHolder {
-            override val clickableView: View
-                get() = binding.root
-            override val firstField: EditText
-                get() = binding.contentEdittext
-            override val saveButton: Button
-                get() = binding.saveButton
-            override val cancelButton: Button
-                get() = binding.cancelButton
-            override val deleteButton: Button
-                get() = binding.deleteButton
-            override val viewGroup: Group
-                get() = binding.viewGroup
-            override val editGroup: Group
-                get() = binding.editGroup
+        if (item.editing) {
+            viewGroup.visibility = View.GONE
+            editGroup.visibility = View.VISIBLE
+            firstField.requestFocus()
+            firstField.showKeyboard()
+        } else {
+            viewGroup.visibility = View.VISIBLE
+            editGroup.visibility = View.GONE
         }
-
-        class AddButtonViewHolder(val binding: AddButtonRecipeItemBinding) :
-            ViewHolder(binding.root)
+        saveButton.setOnClickListener {
+            saveButtonClicked()
+            clickableView.requestFocus()
+        }
     }
 }
 
