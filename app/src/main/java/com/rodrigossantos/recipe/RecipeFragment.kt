@@ -20,14 +20,17 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.navigation.fragment.findNavController
 import androidx.navigation.fragment.navArgs
+import com.rodrigossantos.recipe.RecipeViewModel.RecipeItem
 import com.rodrigossantos.recipe.databinding.AddButtonRecipeItemBinding
 import com.rodrigossantos.recipe.databinding.FragmentRecipeBinding
 import com.rodrigossantos.recipe.databinding.RecipeHeaderItemBinding
 import com.rodrigossantos.recipe.databinding.RecipeIngredientItemBinding
 import com.rodrigossantos.recipe.databinding.RecipeStepItemBinding
 import kotlinx.coroutines.launch
+import kotlin.contracts.ExperimentalContracts
 
 
+@OptIn(ExperimentalContracts::class)
 class RecipeFragment : Fragment() {
 
     private val args by navArgs<RecipeFragmentArgs>()
@@ -65,206 +68,210 @@ class RecipeFragment : Fragment() {
         binding.topAppBar.setOnMenuItemClickListener { item ->
             when (item.itemId) {
                 R.id.edit_recipe_button -> viewModel.editButtonClicked()
-                R.id.multiplier_button -> {
-                    AlertDialog.Builder(binding.topAppBar.context)
-                        .setTitle("Change Ingredients Proportion")
-                        .setSingleChoiceItems(
-                            viewModel.uiState.value.availableMultipliers.map { it.stringValue }
-                                .toTypedArray(),
-                            viewModel.uiState.value.currentMultiplierIndex,
-                        ) { dialog, selectedIndex ->
-                            dialog.dismiss()
-                            viewModel.multiplierUpdated(selectedIndex)
-                        }
-                        .show()
-                }
-
+                R.id.multiplier_button -> multiplierButtonClicked()
                 R.id.save_recipe_button -> viewModel.saveRecipe(binding.recipeNameEdittext.text.toString())
-                R.id.delete_recipe_item -> {
-                    AlertDialog.Builder(binding.topAppBar.context)
-                        .setTitle("Are you sure")
-                        .setPositiveButton("Delete") { dialog, _ ->
-                            viewModel.deleteRecipe()
-                            dialog.dismiss()
-                            findNavController().popBackStack()
-                        }
-                        .setNegativeButton("Cancel") { dialog, _ -> dialog.dismiss() }
-                        .show()
-                }
+                R.id.delete_recipe_item -> deleteButtonClicked()
             }
             true
         }
         binding.list.adapter = adapter
         lifecycleScope.launch {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-                viewModel.uiState.collect {
-                    binding.recipeNameEdittext.apply {
-                        setText(it.recipeName)
-                        visibility = if (it.editing) View.VISIBLE else View.GONE
-                    }
-                    binding.topAppBar.navigationIcon = if (!it.editing) {
-                        AppCompatResources.getDrawable(
-                            binding.topAppBar.context,
-                            R.drawable.baseline_arrow_back_24,
-                        )
-                    } else {
-                        null
-                    }
-                    binding.topAppBar.setNavigationOnClickListener {
-                        findNavController().popBackStack()
-                    }
-                    binding.topAppBar.title = it.recipeName
-                    editRecipeButton.isVisible = !it.editing
-                    multiplierButton.isVisible = !it.editing
-                    multiplierButton.title =
-                        it.availableMultipliers[it.currentMultiplierIndex].stringValue
-                    saveRecipeButton.isVisible = it.editing
-                }
+                viewModel.uiState.collect(::stateUpdated)
             }
         }
     }
 
-    private enum class ViewType {
-        HEADER,
-        INGREDIENT,
-        ADD_INGREDIENT,
-        STEP,
-        ADD_STEP,
+    private fun stateUpdated(state: RecipeViewModel.UiState) {
+        binding.recipeNameEdittext.apply {
+            setText(state.recipeName)
+            visibility = if (state.editing) View.VISIBLE else View.GONE
+        }
+        binding.topAppBar.navigationIcon = if (!state.editing) {
+            AppCompatResources.getDrawable(
+                binding.topAppBar.context,
+                R.drawable.baseline_arrow_back_24,
+            )
+        } else {
+            null
+        }
+        binding.topAppBar.setNavigationOnClickListener {
+            findNavController().popBackStack()
+        }
+        binding.topAppBar.title = state.recipeName
+        editRecipeButton.isVisible = !state.editing
+        multiplierButton.isVisible = !state.editing
+        multiplierButton.title =
+            state.availableMultipliers[state.currentMultiplierIndex].stringValue
+        saveRecipeButton.isVisible = state.editing
     }
 
-    private fun buildAdapter() = createAdapter(
-        itemsProducer = viewLifecycleOwner.produceOnLifecycle {
-            viewModel.uiState.collect { items = it.items }
-        },
-        getViewType = { item: RecipeViewModel.RecipeItem ->
-            when (item) {
-                is RecipeViewModel.RecipeItem.Header -> ViewType.HEADER
-                is RecipeViewModel.RecipeItem.Ingredient -> ViewType.INGREDIENT
-                is RecipeViewModel.RecipeItem.AddIngredient -> ViewType.ADD_INGREDIENT
-                is RecipeViewModel.RecipeItem.Step -> ViewType.STEP
-                is RecipeViewModel.RecipeItem.AddStep -> ViewType.ADD_STEP
+    private fun deleteButtonClicked() {
+        showDialog(binding.topAppBar.context, "Are you sure") {
+            setPositiveButton("Delete") { dialog, _ ->
+                viewModel.deleteRecipe()
+                dialog.dismiss()
+                findNavController().popBackStack()
             }
-        },
-        create = { parent, type ->
-            when (type) {
-                ViewType.HEADER -> RecipeHeaderItemBinding.inflate(
-                    LayoutInflater.from(parent.context),
-                    parent,
-                    false,
-                )
+            setNegativeButton("Cancel") { dialog, _ -> dialog.dismiss() }
+        }
+    }
 
-                ViewType.INGREDIENT -> RecipeIngredientItemBinding.inflate(
-                    LayoutInflater.from(
-                        parent.context
-                    ),
-                    parent, false,
-                )
-
-                ViewType.STEP -> RecipeStepItemBinding.inflate(
-                    LayoutInflater.from(parent.context),
-                    parent,
-                    false
-                )
-
-                ViewType.ADD_STEP,
-                ViewType.ADD_INGREDIENT -> AddButtonRecipeItemBinding.inflate(
-                    LayoutInflater.from(
-                        parent.context
-                    ), parent, false
-                )
+    private fun multiplierButtonClicked() {
+        showDialog(
+            binding.topAppBar.context,
+            "Change Ingredients Proportion"
+        ) {
+            setSingleChoiceItems(
+                viewModel.uiState.value.availableMultipliers.map { it.stringValue }
+                    .toTypedArray(),
+                viewModel.uiState.value.currentMultiplierIndex,
+            ) { dialog, selectedIndex ->
+                dialog.dismiss()
+                viewModel.multiplierUpdated(selectedIndex)
             }
         }
-    ) { binding, item, position ->
-        when (item) {
-            is RecipeViewModel.RecipeItem.Header -> {
-                (binding as RecipeHeaderItemBinding).titleText.text = item.title
-            }
+    }
 
-            is RecipeViewModel.RecipeItem.Modifiable -> {
+    private fun showDialog(
+        context: Context,
+        title: String,
+        build: AlertDialog.Builder.() -> Unit
+    ) {
+        AlertDialog.Builder(context)
+            .setTitle(title)
+            .apply(build)
+            .show()
+    }
+
+    private sealed interface ViewType {
+        object HEADER : ViewType
+        object INGREDIENT : ViewType
+        object ADD_INGREDIENT : ViewType
+        object STEP : ViewType
+        object ADD_STEP : ViewType
+    }
+
+    private fun buildAdapter() =
+        createAdapter(
+            getViewType = { item: RecipeItem ->
                 when (item) {
-                    is RecipeViewModel.RecipeItem.Ingredient -> {
-                        (binding as RecipeIngredientItemBinding).run {
-                            var selectedUnitIndex: Int = item.measurementUnitIndex
-                            bindModifiableItem(
-                                binding.root,
-                                binding.quantityEdittext,
-                                binding.saveButton,
-                                saveButtonClicked = {
-                                    viewModel.saveIngredient(
-                                        position,
-                                        quantityEdittext.text.toString(),
-                                        selectedUnitIndex,
-                                        nameEdittext.text.toString(),
-                                    )
-                                },
-                                binding.cancelButton,
-                                binding.deleteButton,
-                                binding.viewGroup,
-                                binding.editGroup,
-                                item,
-                                position,
-                            )
-                            quantityText.text = item.quantity
-                            quantityEdittext.setText(item.quantity)
-                            val units =
-                                quantityText.resources.getStringArray(R.array.measurement_units)
-                            unitText.text = units[selectedUnitIndex]
-                            val popupMenu = PopupMenu(unitSelector.context, unitSelector).apply {
-                                menuInflater.inflate(R.menu.measurement_unit_selector, menu)
-                                setOnMenuItemClickListener {
-                                    selectedUnitIndex = it.order
-                                    unitSelector.text = it.title
-                                    true
-                                }
-                            }
-                            unitSelector.text = popupMenu.menu.getItem(selectedUnitIndex).title
-                            unitSelector.setOnClickListener { popupMenu.show() }
-                            nameText.text = item.name
-                            nameEdittext.setText(item.name)
-                        }
-                    }
-
-                    is RecipeViewModel.RecipeItem.Step -> {
-                        (binding as RecipeStepItemBinding).run {
-                            bindModifiableItem(
-                                binding.root,
-                                binding.contentEdittext,
-                                binding.saveButton,
-                                saveButtonClicked = {
-                                    viewModel.saveStep(
-                                        position,
-                                        contentEdittext.text.toString()
-                                    )
-                                },
-                                binding.cancelButton,
-                                binding.deleteButton,
-                                binding.viewGroup,
-                                binding.editGroup,
-                                item,
-                                position,
-                            )
-                            indexText.text = item.index
-                            contentText.text = item.text
-                            contentEdittext.setText(item.text)
-                        }
-                    }
+                    is RecipeItem.Header -> ViewType.HEADER
+                    is RecipeItem.Ingredient -> ViewType.INGREDIENT
+                    is RecipeItem.AddIngredient -> ViewType.ADD_INGREDIENT
+                    is RecipeItem.Step -> ViewType.STEP
+                    is RecipeItem.AddStep -> ViewType.ADD_STEP
                 }
+            },
+            create = { type: ViewType ->
+                when (type) {
+                    is ViewType.HEADER -> RecipeHeaderItemBinding::inflate
+                    is ViewType.INGREDIENT -> RecipeIngredientItemBinding::inflate
+                    is ViewType.STEP -> RecipeStepItemBinding::inflate
+                    is ViewType.ADD_STEP,
+                    is ViewType.ADD_INGREDIENT -> AddButtonRecipeItemBinding::inflate
+                }
+            },
+            itemsProducer = viewLifecycleOwner.produceOnLifecycle {
+                viewModel.uiState.collect { items = it.items }
             }
+        ) { item, position ->
+            when (item) {
+                is RecipeItem.Header -> {
+                    (this as RecipeHeaderItemBinding).titleText.text = item.title
+                }
 
-            is RecipeViewModel.RecipeItem.AddIngredient -> {
-                (binding as AddButtonRecipeItemBinding).run {
+                is RecipeItem.Ingredient -> (this as RecipeIngredientItemBinding).bindIngredient(
+                    item,
+                    position
+                )
+
+                is RecipeItem.Step -> (this as RecipeStepItemBinding).bindStep(
+                    position,
+                    item
+                )
+
+                is RecipeItem.AddIngredient -> {
+                    this as AddButtonRecipeItemBinding
                     addButtonText.text = "Add Ingredient"
                     addButtonText.setOnClickListener { viewModel.addIngredientClicked() }
                 }
-            }
 
-            is RecipeViewModel.RecipeItem.AddStep -> {
-                (binding as AddButtonRecipeItemBinding).run {
+                is RecipeItem.AddStep -> {
+                    this as AddButtonRecipeItemBinding
                     addButtonText.text = "Add Step"
                     addButtonText.setOnClickListener { viewModel.addStepClicked() }
                 }
             }
         }
+
+    private fun RecipeStepItemBinding.bindStep(
+        position: Int,
+        item: RecipeItem.Step
+    ) {
+        bindModifiableItem(
+            root,
+            contentEdittext,
+            saveButton,
+            saveButtonClicked = {
+                viewModel.saveStep(
+                    position,
+                    contentEdittext.text.toString()
+                )
+            },
+            cancelButton,
+            deleteButton,
+            viewGroup,
+            editGroup,
+            item,
+            position,
+        )
+        indexText.text = item.index
+        contentText.text = item.text
+        contentEdittext.setText(item.text)
+    }
+
+    private fun RecipeIngredientItemBinding.bindIngredient(
+        item: RecipeItem.Ingredient,
+        position: Int
+    ) {
+        var selectedUnitIndex: Int = item.measurementUnitIndex
+        bindModifiableItem(
+            root,
+            quantityEdittext,
+            saveButton,
+            saveButtonClicked = {
+                viewModel.saveIngredient(
+                    position,
+                    quantityEdittext.text.toString(),
+                    selectedUnitIndex,
+                    nameEdittext.text.toString(),
+                )
+            },
+            cancelButton,
+            deleteButton,
+            viewGroup,
+            editGroup,
+            item,
+            position,
+        )
+        quantityText.text = item.quantity
+        quantityEdittext.setText(item.quantity)
+        val units =
+            quantityText.resources.getStringArray(R.array.measurement_units)
+        unitText.text = units[selectedUnitIndex]
+        val popupMenu = PopupMenu(unitSelector.context, unitSelector).apply {
+            menuInflater.inflate(R.menu.measurement_unit_selector, menu)
+            setOnMenuItemClickListener {
+                selectedUnitIndex = it.order
+                unitSelector.text = it.title
+                true
+            }
+        }
+        unitSelector.text = popupMenu.menu.getItem(selectedUnitIndex).title
+        unitSelector.setOnClickListener { popupMenu.show() }
+        nameText.text = item.name
+        nameEdittext.setText(item.name)
     }
 
     private fun bindModifiableItem(
@@ -276,7 +283,7 @@ class RecipeFragment : Fragment() {
         deleteButton: Button,
         viewGroup: Group,
         editGroup: Group,
-        item: RecipeViewModel.RecipeItem.Modifiable,
+        item: RecipeItem.Modifiable,
         position: Int,
     ) {
         clickableView.setOnClickListener {

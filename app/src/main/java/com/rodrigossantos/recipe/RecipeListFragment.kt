@@ -26,13 +26,7 @@ class RecipeListFragment : Fragment() {
     private val adapter by lazy { buildAdapter() }
 
     private fun buildAdapter() = createAdapter(
-        create = { parent ->
-            RecipeListItemBinding.inflate(
-                LayoutInflater.from(parent.context),
-                parent,
-                false
-            )
-        },
+        create = RecipeListItemBinding::inflate,
         itemsProducer = viewLifecycleOwner.produceOnLifecycle<String> {
             viewModel.uiState.collect {
                 items = it.recipes

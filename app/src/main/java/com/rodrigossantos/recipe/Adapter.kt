@@ -1,5 +1,6 @@
 package com.rodrigossantos.recipe
 
+import android.view.LayoutInflater
 import android.view.ViewGroup
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
@@ -28,7 +29,6 @@ private abstract class TypedBindingAdapter<Binding : ViewBinding, V, T> :
     override fun getItemCount(): Int {
         return items.size
     }
-
 
     private val viewTypes: MutableSet<V> = mutableSetOf()
 
@@ -87,18 +87,21 @@ fun <T> LifecycleOwner.produceOnLifecycle(
 }
 
 fun <B : ViewBinding, T> createAdapter(
-    create: (parent: ViewGroup) -> B,
+    create: (inflater: LayoutInflater, parent: ViewGroup, attachToParent: Boolean) -> B,
     itemsProducer: ItemProducer<T>,
     bind: (binding: B, item: T, position: Int) -> Unit
 ): SimpleAdapter = createAdapter(
-    getViewType = { 0 }, create = { parent, _ -> create(parent) }, itemsProducer, bind,
+    getViewType = { 0 },
+    create = { _ -> create },
+    itemsProducer,
+    bind,
 )
 
 fun <B : ViewBinding, V, T> createAdapter(
     getViewType: (T) -> V,
-    create: (parent: ViewGroup, viewType: V) -> B,
+    create: (viewType: V) -> (inflater: LayoutInflater, parent: ViewGroup, attachToParent: Boolean) -> B,
     itemsProducer: ItemProducer<T>,
-    bind: (binding: B, item: T, position: Int) -> Unit
+    bind: B.(item: T, position: Int) -> Unit
 ): SimpleAdapter =
     object : TypedBindingAdapter<B, V, T>() {
         init {
@@ -106,10 +109,19 @@ fun <B : ViewBinding, V, T> createAdapter(
         }
 
         override fun createBinding(parent: ViewGroup, viewType: V): B =
-            create(parent, viewType)
+            inflate(parent, create(viewType))
 
-        override fun bind(binding: B, item: T, position: Int) =
-            bind(binding, item, position)
+
+        override fun bind(binding: B, item: T, position: Int) {
+            binding.bind(item, position)
+        }
 
         override fun getViewType(item: T): V = getViewType(item)
     }
+
+private fun <B : ViewBinding> inflate(
+    parent: ViewGroup,
+    inflate: (inflater: LayoutInflater, parent: ViewGroup, attachToParent: Boolean) -> B
+): B {
+    return inflate(LayoutInflater.from(parent.context), parent, false)
+}
