@@ -20,6 +20,8 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.navigation.fragment.findNavController
 import androidx.navigation.fragment.navArgs
+import com.google.android.material.tabs.TabLayout
+import com.google.android.material.tabs.TabLayout.OnTabSelectedListener
 import com.rodrigossantos.recipe.RecipeViewModel.RecipeItem
 import com.rodrigossantos.recipe.databinding.AddButtonRecipeItemBinding
 import com.rodrigossantos.recipe.databinding.FragmentRecipeBinding
@@ -55,7 +57,16 @@ class RecipeFragment : Fragment() {
         factoryProducer = { RecipeViewModel.Factory(binding.root.context, args.recipeIndex) }
     )
 
-    private val adapter by lazy { buildAdapter() }
+    private val ingredientsAdapter by lazy {
+        buildAdapter {
+            items = it.ingredients
+        }
+    }
+    private val stepsAdapter by lazy {
+        buildAdapter {
+            items = it.steps
+        }
+    }
 
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?,
@@ -74,7 +85,21 @@ class RecipeFragment : Fragment() {
             }
             true
         }
-        binding.list.adapter = adapter
+        binding.tabBar.addOnTabSelectedListener(object : OnTabSelectedListener {
+            override fun onTabSelected(tab: TabLayout.Tab) {
+                when (tab.position) {
+                    0 -> binding.slidingPaneLayout.close()
+                    1 -> binding.slidingPaneLayout.open()
+                }
+            }
+
+            override fun onTabUnselected(tab: TabLayout.Tab?) = Unit
+
+            override fun onTabReselected(tab: TabLayout.Tab?) = Unit
+
+        })
+        binding.ingredientsList.adapter = ingredientsAdapter
+        binding.stepsList.adapter = stepsAdapter
         lifecycleScope.launch {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.RESUMED) {
                 viewModel.uiState.collect(::stateUpdated)
@@ -152,7 +177,7 @@ class RecipeFragment : Fragment() {
         object ADD_STEP : ViewType
     }
 
-    private fun buildAdapter() =
+    private fun buildAdapter(onStateUpdate: suspend MutableItemListSource<RecipeItem>.(RecipeViewModel.UiState) -> Unit) =
         createAdapter(
             getViewType = { item: RecipeItem ->
                 when (item) {
@@ -173,7 +198,7 @@ class RecipeFragment : Fragment() {
                 }
             },
             itemsProducer = viewLifecycleOwner.produceOnLifecycle {
-                viewModel.uiState.collect { items = it.items }
+                viewModel.uiState.collect { onStateUpdate(it) }
             }
         ) { item, position ->
             when (item) {
@@ -274,28 +299,28 @@ class RecipeFragment : Fragment() {
         nameEdittext.setText(item.name)
     }
 
-    private fun bindModifiableItem(
+    private inline fun <reified T : RecipeItem.Modifiable> bindModifiableItem(
         clickableView: View,
         firstField: EditText,
         saveButton: Button,
-        saveButtonClicked: () -> Unit,
+        crossinline saveButtonClicked: () -> Unit,
         cancelButton: Button,
         deleteButton: Button,
         viewGroup: Group,
         editGroup: Group,
-        item: RecipeItem.Modifiable,
+        item: T,
         position: Int,
     ) {
         clickableView.setOnClickListener {
-            viewModel.itemClicked(position)
+            viewModel.itemClicked<T>(position)
         }
         cancelButton.setOnClickListener {
-            viewModel.cancelEdit(position)
-            clickableView.requestFocus()
+            viewModel.cancelEdit<T>(position)
+            clickableView.hideKeyboard()
         }
         deleteButton.setOnClickListener {
-            viewModel.deleteItem(position)
-            clickableView.requestFocus()
+            viewModel.deleteItem<T>(position)
+            clickableView.hideKeyboard()
         }
         if (item.editing) {
             viewGroup.visibility = View.GONE
@@ -308,7 +333,7 @@ class RecipeFragment : Fragment() {
         }
         saveButton.setOnClickListener {
             saveButtonClicked()
-            clickableView.requestFocus()
+            clickableView.hideKeyboard()
         }
     }
 }
@@ -317,6 +342,13 @@ private fun View.showKeyboard() {
     (context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager)?.showSoftInput(
         this,
         InputMethodManager.SHOW_IMPLICIT
+    )
+}
+
+private fun View.hideKeyboard() {
+    (context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager)?.hideSoftInputFromWindow(
+        windowToken,
+        InputMethodManager.HIDE_IMPLICIT_ONLY
     )
 }
 

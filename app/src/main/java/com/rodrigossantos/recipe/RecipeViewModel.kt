@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.text.DecimalFormat
+import kotlin.reflect.typeOf
 
 class RecipeViewModel(private val repository: RecipesRepository, private val recipeIndex: Int) :
     ViewModel() {
@@ -22,7 +23,8 @@ class RecipeViewModel(private val repository: RecipesRepository, private val rec
         val recipeName: String,
         val availableMultipliers: List<Multiplier>,
         val currentMultiplierIndex: Int,
-        val items: List<RecipeItem>,
+        val ingredients: List<RecipeItem>,
+        val steps: List<RecipeItem>,
         val editing: Boolean,
     )
 
@@ -73,29 +75,34 @@ class RecipeViewModel(private val repository: RecipesRepository, private val rec
             Multiplier.entries,
             Multiplier.entries.indexOf(Multiplier.SINGLE),
             emptyList(),
+            emptyList(),
             false,
         )
     )
     private val recipeFlow = repository.getRecipe(recipeIndex).onEach {
         _uiState.value = uiState.value.copy(
-            items = genItems(it)
+            ingredients = genIngredients(it),
+            steps = genSteps(it),
         )
     }
     val uiState: StateFlow<UiState> = combine(_uiState, recipeFlow) { state, recipe ->
         val multiplier = Multiplier.entries[state.currentMultiplierIndex].value
-        val updatedItems = state.items.map {
-            if (it is RecipeItem.Ingredient && it.dataIndex != -1) {
-                val quantity = recipe.ingredientsList[it.dataIndex].quantity * multiplier
-                it.copy(quantity = DecimalFormat("#.##").format(quantity))
+        fun updateItem(item: RecipeItem) =
+            if (item is RecipeItem.Ingredient && item.dataIndex != -1 && recipe.ingredientsList.size > item.dataIndex) {
+                val quantity = recipe.ingredientsList[item.dataIndex].quantity * multiplier
+                item.copy(quantity = DecimalFormat("#.##").format(quantity))
             } else {
-                it
+                item
             }
-        }
+
+        val updatedIngredients = state.ingredients.map(::updateItem)
+        val updatedSteps = state.steps.map(::updateItem)
         UiState(
             recipeName = recipe.name,
             availableMultipliers = Multiplier.entries,
             currentMultiplierIndex = state.currentMultiplierIndex,
-            items = updatedItems,
+            ingredients = updatedIngredients,
+            steps = updatedSteps,
             editing = state.editing,
         )
     }.stateIn(viewModelScope, SharingStarted.Lazily, _uiState.value)
@@ -119,23 +126,45 @@ class RecipeViewModel(private val repository: RecipesRepository, private val rec
         _uiState.value = uiState.value.copy(currentMultiplierIndex = newMultiplierIndex)
     }
 
-    fun itemClicked(index: Int) {
-        uiState.value.items.getOrNull(index)?.let { originalItem ->
-            val newItem = when (originalItem) {
-                is RecipeItem.Ingredient -> {
-                    originalItem.copy(editing = true)
-                }
+    inline fun <reified T : RecipeItem.Modifiable> itemClicked(index: Int) {
+        when (typeOf<T>()) {
+            typeOf<RecipeItem.Ingredient>() -> ingredientItemClicked(index)
+            typeOf<RecipeItem.Step>() -> ingredientItemClicked(index)
+        }
+    }
 
-                is RecipeItem.Step -> {
-                    originalItem.copy(editing = true)
-                }
+    inline fun <reified T : RecipeItem.Modifiable> cancelEdit(index: Int) {
+        when (typeOf<T>()) {
+            typeOf<RecipeItem.Ingredient>() -> cancelIngredientEdit(index)
+            typeOf<RecipeItem.Step>() -> cancelStepEdit(index)
+        }
+    }
 
-                else -> {
-                    originalItem
-                }
-            }
+    inline fun <reified T : RecipeItem.Modifiable> deleteItem(index: Int) {
+        when (typeOf<T>()) {
+            typeOf<RecipeItem.Ingredient>() -> deleteIngredient(index)
+            typeOf<RecipeItem.Step>() -> deleteStep(index)
+        }
+    }
+
+    fun ingredientItemClicked(index: Int) {
+        uiState.value.ingredients.getOrNull(index)?.let { originalItem ->
+            val newItem =
+                (originalItem as? RecipeItem.Modifiable)?.duplicate(editing = true) ?: originalItem
             _uiState.value = uiState.value.copy(
-                items = uiState.value.items.toMutableList().also {
+                ingredients = uiState.value.ingredients.toMutableList().also {
+                    it[index] = newItem
+                }.toList()
+            )
+        }
+    }
+
+    fun stepItemClicked(index: Int) {
+        uiState.value.steps.getOrNull(index)?.let { originalItem ->
+            val newItem =
+                (originalItem as? RecipeItem.Modifiable)?.duplicate(editing = true) ?: originalItem
+            _uiState.value = uiState.value.copy(
+                ingredients = uiState.value.steps.toMutableList().also {
                     it[index] = newItem
                 }.toList()
             )
@@ -144,14 +173,14 @@ class RecipeViewModel(private val repository: RecipesRepository, private val rec
 
     fun addIngredientClicked() {
         viewModelScope.launch {
-            val newIndex = uiState.value.items.run {
+            val newIndex = uiState.value.ingredients.run {
                 indexOfLast { it is RecipeItem.Ingredient }.takeIf { it != -1 }?.plus(1)
                     ?: (indexOfLast { it is RecipeItem.AddIngredient })
             }
             val newItem =
                 RecipeItem.Ingredient(-1, "", 0, "", editing = true)
             _uiState.value = uiState.value.copy(
-                items = uiState.value.items.toMutableList().also {
+                ingredients = uiState.value.ingredients.toMutableList().also {
                     it.add(newIndex, newItem)
                 }.toList()
             )
@@ -159,7 +188,7 @@ class RecipeViewModel(private val repository: RecipesRepository, private val rec
     }
 
     fun saveIngredient(index: Int, quantity: String, unitIndex: Int, name: String) {
-        val ingredient = uiState.value.items[index] as RecipeItem.Ingredient
+        val ingredient = uiState.value.ingredients[index] as RecipeItem.Ingredient
         viewModelScope.launch {
             if (ingredient.dataIndex != -1) {
                 repository.updateIngredient(
@@ -179,7 +208,7 @@ class RecipeViewModel(private val repository: RecipesRepository, private val rec
             }
         }
         _uiState.value = uiState.value.copy(
-            items = uiState.value.items.toMutableList().also {
+            ingredients = uiState.value.ingredients.toMutableList().also {
                 it[index] = ingredient.copy(editing = false)
             }.toList()
         )
@@ -187,13 +216,13 @@ class RecipeViewModel(private val repository: RecipesRepository, private val rec
 
     fun addStepClicked() {
         viewModelScope.launch {
-            val newIndex = uiState.value.items.run {
+            val newIndex = uiState.value.steps.run {
                 indexOfLast { it is RecipeItem.Step }.takeIf { it != -1 }?.plus(1)
                     ?: (indexOfLast { it is RecipeItem.AddStep })
             }
             val newItem = RecipeItem.Step(-1, "", "", editing = true)
             _uiState.value = uiState.value.copy(
-                items = uiState.value.items.toMutableList().also {
+                steps = uiState.value.steps.toMutableList().also {
                     it.add(newIndex, newItem)
                 }.toList()
             )
@@ -201,7 +230,7 @@ class RecipeViewModel(private val repository: RecipesRepository, private val rec
     }
 
     fun saveStep(index: Int, content: String) {
-        val step = uiState.value.items[index] as RecipeItem.Step
+        val step = uiState.value.steps[index] as RecipeItem.Step
         viewModelScope.launch {
             if (step.dataIndex != -1) {
                 repository.updateStep(recipeIndex, step.dataIndex, content)
@@ -210,16 +239,16 @@ class RecipeViewModel(private val repository: RecipesRepository, private val rec
             }
         }
         _uiState.value = uiState.value.copy(
-            items = uiState.value.items.toMutableList().also {
+            steps = uiState.value.steps.toMutableList().also {
                 it[index] = step.copy(editing = false)
             }.toList()
         )
     }
 
-    fun cancelEdit(index: Int) {
-        val item = uiState.value.items[index] as? RecipeItem.Modifiable ?: return
+    fun cancelIngredientEdit(index: Int) {
+        val item = uiState.value.ingredients[index] as? RecipeItem.Modifiable ?: return
         _uiState.value = uiState.value.copy(
-            items = uiState.value.items.toMutableList().also {
+            ingredients = uiState.value.ingredients.toMutableList().also {
                 if (item.dataIndex != -1) {
                     it[index] = item.duplicate(editing = false)
                 } else {
@@ -229,21 +258,42 @@ class RecipeViewModel(private val repository: RecipesRepository, private val rec
         )
     }
 
-    fun deleteItem(index: Int) {
-        val item = uiState.value.items[index] as? RecipeItem.Modifiable ?: return
+    fun cancelStepEdit(index: Int) {
+        val item = uiState.value.steps[index] as? RecipeItem.Modifiable ?: return
+        _uiState.value = uiState.value.copy(
+            steps = uiState.value.steps.toMutableList().also {
+                if (item.dataIndex != -1) {
+                    it[index] = item.duplicate(editing = false)
+                } else {
+                    it.removeAt(index)
+                }
+            }.toList()
+        )
+    }
+
+    fun deleteIngredient(index: Int) {
+        val item = uiState.value.ingredients[index] as? RecipeItem.Modifiable ?: return
         if (item.dataIndex == -1) {
-            cancelEdit(index)
+            cancelIngredientEdit(index)
             return
         }
         viewModelScope.launch {
-            when (item) {
-                is RecipeItem.Ingredient -> repository.removeIngredient(recipeIndex, item.dataIndex)
-                is RecipeItem.Step -> repository.removeStep(recipeIndex, item.dataIndex)
-            }
+            repository.removeIngredient(recipeIndex, item.dataIndex)
         }
     }
 
-    private fun genItems(recipe: Recipe): List<RecipeItem> {
+    fun deleteStep(index: Int) {
+        val item = uiState.value.steps[index] as? RecipeItem.Modifiable ?: return
+        if (item.dataIndex == -1) {
+            cancelStepEdit(index)
+            return
+        }
+        viewModelScope.launch {
+            repository.removeStep(recipeIndex, item.dataIndex)
+        }
+    }
+
+    private fun genIngredients(recipe: Recipe): List<RecipeItem> {
         val items: MutableList<RecipeItem> = mutableListOf()
         items.add(RecipeItem.Header("Ingredients"))
         recipe.ingredientsList.toList().mapIndexed { index, ingredient ->
@@ -252,18 +302,23 @@ class RecipeViewModel(private val repository: RecipesRepository, private val rec
                 quantity = ingredient.quantity.toString(),
                 measurementUnitIndex = MeasurementUnit.entries.indexOf(ingredient.unit),
                 name = ingredient.name,
-                editing = (uiState.value.items.getOrNull(index) as? RecipeItem.Ingredient)?.editing
+                editing = (uiState.value.ingredients.getOrNull(index) as? RecipeItem.Ingredient)?.editing
                     ?: false,
             )
         }.let { items.addAll(it) }
         items.add(RecipeItem.AddIngredient)
+        return items.toList()
+    }
+
+    private fun genSteps(recipe: Recipe): List<RecipeItem> {
+        val items: MutableList<RecipeItem> = mutableListOf()
         items.add(RecipeItem.Header("Steps"))
         recipe.stepsList.toList().mapIndexed { index, step ->
             RecipeItem.Step(
                 dataIndex = index,
                 index = (index + 1).toString(),
                 text = step.text,
-                editing = (uiState.value.items.getOrNull(index) as? RecipeItem.Step)?.editing
+                editing = (uiState.value.steps.getOrNull(index) as? RecipeItem.Step)?.editing
                     ?: false,
             )
         }.let { items.addAll(it) }
