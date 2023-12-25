@@ -10,8 +10,7 @@
         android:layout_width="wrap_content"
         android:layout_height="match_parent"
         android:visibility="visible"
-        app:constraint_referenced_ids="content_text"
-        tools:visibility="gone" />
+        app:constraint_referenced_ids="content_text" />
 
     <TextView
         android:id="@+id/index_text"
@@ -45,7 +44,7 @@
         android:layout_height="match_parent"
         android:visibility="gone"
         app:constraint_referenced_ids="content_edittext,save_button,cancel_button,delete_button"
-        tools:visibility="visible" />
+        tools:visibility="gone" />
 
     <EditText
         android:id="@+id/content_edittext"
