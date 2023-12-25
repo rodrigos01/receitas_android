@@ -129,7 +129,7 @@ class RecipeViewModel(private val repository: RecipesRepository, private val rec
     inline fun <reified T : RecipeItem.Modifiable> itemClicked(index: Int) {
         when (typeOf<T>()) {
             typeOf<RecipeItem.Ingredient>() -> ingredientItemClicked(index)
-            typeOf<RecipeItem.Step>() -> ingredientItemClicked(index)
+            typeOf<RecipeItem.Step>() -> stepItemClicked(index)
         }
     }
 
